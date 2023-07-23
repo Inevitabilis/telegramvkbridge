@@ -10,12 +10,10 @@ using telegramvkbridge;
 #region Initstuff
 string botToken = System.IO.File.ReadAllText("E:\\prog\\TgBotToken.txt");
 string sqlConnectionParams = System.IO.File.ReadAllText("E:\\prog\\sqlconnection.txt");
-var conn = new NpgsqlConnection(sqlConnectionParams);
-conn.Open();
+var datasource = NpgsqlDataSource.Create(sqlConnectionParams);
 
 var botClient = new TelegramBotClient(botToken);
 using CancellationTokenSource cts = new();
-
 
 // StartReceiving does not block the caller thread. Receiving is done on the ThreadPool.
 ReceiverOptions receiverOptions = new()
@@ -34,7 +32,7 @@ var me = await botClient.GetMeAsync();
 
 Console.WriteLine($"Connection startup");
 
-Update();
+DatabaseCheck();
 
 Console.ReadLine();
 #endregion
@@ -43,31 +41,20 @@ Console.ReadLine();
 #region shutdown
 // Send cancellation request to stop bot
 cts.Cancel();
-conn.Close();
 #endregion
 
 
-async void Update()
+async void DatabaseCheck()
 {
-    await using (var cmd = new NpgsqlCommand("SELECT token FROM demodata WHERE dbid = 2", conn))
+    await using (var cmd = datasource.CreateCommand("SELECT token FROM demodata WHERE dbid = 1"))
     await using (var reader = await cmd.ExecuteReaderAsync())
     {
         while (await reader.ReadAsync())
             Console.WriteLine(reader.GetString(0));
     }
-    await conn.CloseAsync();
 } 
 
-StaticStuff.UserState getUserState(Int64 userId)
-{
-    var reader = new NpgsqlCommand($"SELECT state FROM usertable WHERE id = {userId}").ExecuteReader();
-    if (reader.Read()) return (StaticStuff.UserState)reader.GetInt32(0);
-    else return StaticStuff.UserState.NoAuth;
-}
-void setUserState(Int64 userId, StaticStuff.UserState)
-{
 
-}
 
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
 {
@@ -80,14 +67,23 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         return;
 
     var chatId = message.Chat.Id;
+    StaticStuff.UserState userState = SqlOperations.GetUserState(chatId, datasource);
 
     if (messageText == "/start")    await botClient.SendTextMessageAsync(chatId,
         "This bot mirrors your messages to the chat you specified from your account\n" +
         "\n" +
         "Your credentials would be required to sign in\n" +
         "\n" +
-        "We do not store your credentials, only limited access tokens",
+        "We do not store your credentials, only limited access tokens\n" +
+        "\n" +
+        "Execute /login to start the procedure",
         cancellationToken: cancellationToken);
+    if(userState == StaticStuff.UserState.NoAuth)
+    {
+
+    }
+
+
 
     Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
 
