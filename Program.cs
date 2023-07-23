@@ -6,6 +6,8 @@ using Telegram.Bot.Types.Enums;
 using Npgsql;
 using VkNet;
 using telegramvkbridge;
+using VkNet.Model;
+using VkNet.Enums.Filters;
 
 #region Initstuff
 string botToken = System.IO.File.ReadAllText("E:\\prog\\TgBotToken.txt");
@@ -18,7 +20,7 @@ using CancellationTokenSource cts = new();
 // StartReceiving does not block the caller thread. Receiving is done on the ThreadPool.
 ReceiverOptions receiverOptions = new()
 {
-    AllowedUpdates = Array.Empty<UpdateType>() // receive all update types except ChatMember related updates
+    AllowedUpdates = Array.Empty<Telegram.Bot.Types.Enums.UpdateType>() // receive all update types except ChatMember related updates
 };
 
 botClient.StartReceiving(
@@ -69,20 +71,64 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     var chatId = message.Chat.Id;
     StaticStuff.UserState userState = SqlOperations.GetUserState(chatId, datasource);
 
-    if (messageText == "/start")    await botClient.SendTextMessageAsync(chatId,
-        "This bot mirrors your messages to the chat you specified from your account\n" +
-        "\n" +
-        "Your credentials would be required to sign in\n" +
-        "\n" +
-        "We do not store your credentials, only limited access tokens\n" +
-        "\n" +
-        "Execute /login to start the procedure",
-        cancellationToken: cancellationToken);
-    if(userState == StaticStuff.UserState.NoAuth)
+    switch(userState)
     {
+        case StaticStuff.UserState.NoAuth:
+        
+            if (messageText == "/start") await botClient.SendTextMessageAsync(chatId,
+                "This bot mirrors your messages to the chat you specified from your account\n" +
+                "\n" +
+                "Your credentials would be required to sign in\n" +
+                "\n" +
+                "We do not store your credentials, only limited access tokens\n" +
+                "\n" +
+                "Execute /login to start the procedure",
+                cancellationToken: cancellationToken);
+            else if (messageText == "/login")
+            {
+                await botClient.SendTextMessageAsync(chatId,
+                "Please enter your login and, within the same message, on the next line, password", //This is a thing because I promised I won't store credentials, and I don't
+                cancellationToken: cancellationToken);
+                SqlOperations.SetUserState(chatId, StaticStuff.UserState.EnteringLogin, datasource);
+            }
+            break;
+        case StaticStuff.UserState.EnteringLogin:            
+            string[] response = messageText.Split('\n');
+            if(response.Length == 2) //Only two lines are required. Everything else would be assumed as user trying to do bad stuff
+            {
+                try
+                {
+                    var api = new VkApi();
+                    api.Authorize(new ApiAuthParams
+                    {
+                        ApplicationId = 51697198,
+                        Login = response[0],
+                        Password = response[1],
+                        Settings = Settings.Offline | Settings.Messages
+                    });
+                    SqlOperations.SetUserToken(chatId, api.Token, datasource);
+                    SqlOperations.SetUserState(chatId, StaticStuff.UserState.Connected, datasource);
+                }
+                catch(Exception e)  //Theoretically there were different exceptions according to docs, but no, couldn't find auth exception in the list
+                {
+                    Console.WriteLine(e);
+                    await botClient.SendTextMessageAsync(chatId,
+                    "Unknown error occured while attempting to request token",
+                    cancellationToken: cancellationToken);
+                }
+            }
+            else
+            {
+                await botClient.SendTextMessageAsync(chatId,
+                    "The form of credentials was invalid. Only two strings are required",
+                    cancellationToken: cancellationToken);
+            }
+            break;
+            
+
+    
 
     }
-
 
 
     Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");

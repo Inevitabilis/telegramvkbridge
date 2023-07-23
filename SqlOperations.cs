@@ -32,5 +32,11 @@ namespace telegramvkbridge
         {
             var cmd = dataSource.CreateCommand($"INSERT INTO usertable (id, state) VALUES ({userId}, {(int)StaticStuff.UserState.NoAuth}");
         }
+
+        public static void SetUserToken(Int64 userId, string token, NpgsqlDataSource dataSource)
+        {
+            var cmd = dataSource.CreateCommand($"UPDATE usertable SET token = {token} WHERE id = {userId}");
+            cmd.ExecuteNonQuery();
+        }
     }
 }
