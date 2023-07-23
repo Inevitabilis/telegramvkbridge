@@ -11,10 +11,9 @@ namespace telegramvkbridge
         public enum UserState
         {
             NoAuth = 0,
-            EnteringLogin = 1,
-            EnteringPassword = 2,
-            TokenAcquired = 3,
-            Connected = 4,
+            EnteringCredentials = 1,
+            ChatChoice = 2,
+            Connected = 3,
 
         }
     }

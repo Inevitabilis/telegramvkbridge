@@ -29,12 +29,11 @@ botClient.StartReceiving(
     receiverOptions: receiverOptions,
     cancellationToken: cts.Token
 );
-
 var me = await botClient.GetMeAsync();
 
 Console.WriteLine($"Connection startup");
-
 DatabaseCheck();
+
 
 Console.ReadLine();
 #endregion
@@ -67,11 +66,12 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
     // Only process text messages
     if (message.Text is not { } messageText)
         return;
-
     var chatId = message.Chat.Id;
+    Console.WriteLine($"Received a '{messageText}' message in chat {chatId}."); //Debug purposes. I really need to remove it before any sensitive data leaks...
     StaticStuff.UserState userState = SqlOperations.GetUserState(chatId, datasource);
+    var api = new VkApi();
 
-    switch(userState)
+    switch (userState)//state machine yay!
     {
         case StaticStuff.UserState.NoAuth:
         
@@ -89,16 +89,15 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
                 await botClient.SendTextMessageAsync(chatId,
                 "Please enter your login and, within the same message, on the next line, password", //This is a thing because I promised I won't store credentials, and I don't
                 cancellationToken: cancellationToken);
-                SqlOperations.SetUserState(chatId, StaticStuff.UserState.EnteringLogin, datasource);
+                SqlOperations.SetUserState(chatId, StaticStuff.UserState.EnteringCredentials, datasource);
             }
             break;
-        case StaticStuff.UserState.EnteringLogin:            
+        case StaticStuff.UserState.EnteringCredentials:            
             string[] response = messageText.Split('\n');
             if(response.Length == 2) //Only two lines are required. Everything else would be assumed as user trying to do bad stuff
             {
                 try
                 {
-                    var api = new VkApi();
                     api.Authorize(new ApiAuthParams
                     {
                         ApplicationId = 51697198,
@@ -107,7 +106,23 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
                         Settings = Settings.Offline | Settings.Messages
                     });
                     SqlOperations.SetUserToken(chatId, api.Token, datasource);
-                    SqlOperations.SetUserState(chatId, StaticStuff.UserState.Connected, datasource);
+                    SqlOperations.SetUserState(chatId, StaticStuff.UserState.ChatChoice, datasource);
+                    var convos = api.Messages.GetConversations(new GetConversationsParams()
+                    {
+                        Offset = 0,
+                        Count = 10,
+                        Extended = false,
+                    });
+
+                    string LastConvos = "";
+                    foreach (var conversationAndLastMessage in convos.Items)
+                    {
+                        LastConvos += conversationAndLastMessage.Conversation.ChatSettings.Title + "\n";
+                    }
+                    await botClient.SendTextMessageAsync(chatId,
+                            LastConvos +
+                            "Here are the last ten chats I got. Type a part of the group name (not necessarily within the list) to connect to the desired chat",
+                            cancellationToken: cancellationToken);
                 }
                 catch(Exception e)  //Theoretically there were different exceptions according to docs, but no, couldn't find auth exception in the list
                 {
@@ -115,6 +130,10 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
                     await botClient.SendTextMessageAsync(chatId,
                     "Unknown error occured while attempting to request token",
                     cancellationToken: cancellationToken);
+                }
+                finally
+                {
+                    api.Dispose();
                 }
             }
             else
@@ -124,21 +143,54 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
                     cancellationToken: cancellationToken);
             }
             break;
-            
+        case StaticStuff.UserState.ChatChoice:
+            api.Authorize(new ApiAuthParams
+            {
+                AccessToken = SqlOperations.GetUserToken(chatId, datasource)
+            });
+            var convos2 = api.Messages.GetConversations(new GetConversationsParams()
+            {
+                Offset = 0,
+                Count = 100,
+                Extended = false,
+            });
+            ConversationAndLastMessage desiredConversation = null;
+            foreach (var conversationAndLastMessage in convos2.Items)
+            {
+                if(conversationAndLastMessage.Conversation.ChatSettings.Title.Contains(messageText))
+                {
+                    await botClient.SendTextMessageAsync(chatId,
+                    "Connected to the chat \"" + conversationAndLastMessage.Conversation.ChatSettings.Title + "\"\nID = " + conversationAndLastMessage.Conversation.Peer.Id,
+                    cancellationToken: cancellationToken);
+                    desiredConversation = conversationAndLastMessage;
+                    break;
+                }
+            }
+            if(desiredConversation == null) await botClient.SendTextMessageAsync(chatId,
+                    "Couldn't find specified chat",
+                    cancellationToken: cancellationToken);
+            else
+            {
+                SqlOperations.SetUserChatID(chatId, desiredConversation.Conversation.Peer.Id, datasource);
+                SqlOperations.SetUserState(chatId, StaticStuff.UserState.Connected, datasource);
+            }
+            api.Dispose();
+            break;
+        case StaticStuff.UserState.Connected:
+            api.Authorize(new ApiAuthParams
+            {
+                AccessToken = SqlOperations.GetUserToken(chatId, datasource)
+            });
+            api.Messages.Send(new MessagesSendParams()
+            {
+                UserId = api.UserId,
+                RandomId = 0,
+                PeerId = SqlOperations.GetUserChatID(chatId, datasource),
+                Message = messageText
+            });
 
-    
-
+            break;
     }
-
-
-    Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
-
-    // Echo received message text
-    Message sentMessage = await botClient.SendTextMessageAsync(
-        chatId: chatId,
-        text: "You said:\n" + messageText,
-        cancellationToken: cancellationToken);
-    
 }
 
 Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)

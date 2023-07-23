@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using Npgsql;
 
 namespace telegramvkbridge
@@ -22,21 +24,43 @@ namespace telegramvkbridge
             }
         }
 
-        public static void SetUserState(Int64 userId, StaticStuff.UserState state, NpgsqlDataSource dataSource)
+        public static void SetUserState(Int64 userID, StaticStuff.UserState state, NpgsqlDataSource dataSource)
         {
-            var cmd = dataSource.CreateCommand($"UPDATE usertable SET state = {(int)state} WHERE id = {userId}");
+            var cmd = dataSource.CreateCommand($"UPDATE usertable SET state = {(int)state} WHERE id = {userID}");
             cmd.ExecuteNonQuery();
         }
 
-        public static void CreateUser(Int64 userId, NpgsqlDataSource dataSource)
+        public static void CreateUser(Int64 userID, NpgsqlDataSource dataSource)
         {
-            var cmd = dataSource.CreateCommand($"INSERT INTO usertable (id, state) VALUES ({userId}, {(int)StaticStuff.UserState.NoAuth}");
+            Console.WriteLine($"INSERT INTO usertable (id, state) VALUES ({userID}, {(int)StaticStuff.UserState.NoAuth})");
+            var cmd = dataSource.CreateCommand($"INSERT INTO usertable (id, state) VALUES ({userID}, {(int)StaticStuff.UserState.NoAuth})");
+            cmd.ExecuteNonQuery();
         }
 
-        public static void SetUserToken(Int64 userId, string token, NpgsqlDataSource dataSource)
+        public static void SetUserToken(Int64 userID, string token, NpgsqlDataSource dataSource)
         {
-            var cmd = dataSource.CreateCommand($"UPDATE usertable SET token = {token} WHERE id = {userId}");
+            var cmd = dataSource.CreateCommand($"UPDATE usertable SET token = {token} WHERE id = {userID}");
             cmd.ExecuteNonQuery();
+        }
+
+        public static string GetUserToken(Int64 userID, NpgsqlDataSource dataSource) 
+        {
+            var cmd = dataSource.CreateCommand($"SELECT token FROM usertable WHERE id = {userID}");
+            var reader = cmd.ExecuteReader();
+            return reader.GetString(0);
+        }
+
+        public static void SetUserChatID(Int64 userID, long chatID, NpgsqlDataSource dataSource) 
+        {
+            var cmd = dataSource.CreateCommand($"UPDATE usertable SET chatID = {chatID} WHERE id = {userID}");
+            cmd.ExecuteNonQuery();
+        }
+
+        public static long GetUserChatID(Int64 userID, NpgsqlDataSource dataSource)
+        {
+            var cmd = dataSource.CreateCommand($"SELECT chatID FROM usertable WHERE id = {userID}");
+            var reader = cmd.ExecuteReader();
+            return reader.GetInt64(0);
         }
     }
 }
